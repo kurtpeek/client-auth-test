@@ -23,14 +23,17 @@ import (
 )
 
 func TestDeviceFromTLS(t *testing.T) {
-	deviceKeyPEM, csrPEM := generateKeyAndCSR(t)
+	caKey, _ := generateKey(t)
+	caCert, _ := generateRootCert(t, caKey)
 
-	caKey, caKeyPEM := generateKey(t)
-	caCert, caCertPEM := generateRootCert(t, caKey)
+	deviceKeyPEM, deviceCsrPEM := generateKeyAndCSR(t)
+	deviceCertPEM := signCSR(t, deviceCsrPEM, caKey, caCert)
+	deviceCert, err := tls.X509KeyPair(deviceCertPEM, deviceKeyPEM)
+	require.NoError(t, err)
 
-	deviceCertPEM := signCSR(t, csrPEM, caKey, caCert)
-
-	serverCert, err := tls.X509KeyPair(caCertPEM, caKeyPEM)
+	serverKeyPEM, serverCsrPEM := generateKeyAndCSR(t)
+	serverCertPEM := signCSR(t, serverCsrPEM, caKey, caCert)
+	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
 	require.NoError(t, err)
 
 	clientPool := x509.NewCertPool()
@@ -47,17 +50,13 @@ func TestDeviceFromTLS(t *testing.T) {
 	ts.StartTLS()
 	defer ts.Close()
 
-	deviceCert, err := tls.X509KeyPair(deviceCertPEM, deviceKeyPEM)
-	require.NoError(t, err)
-
-	pool := x509.NewCertPool()
-	pool.AddCert(caCert)
+	serverPool := x509.NewCertPool()
+	serverPool.AddCert(caCert)
 
 	client := ts.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{
-		Certificates:       []tls.Certificate{deviceCert},
-		RootCAs:            pool,
-		InsecureSkipVerify: true,
+		Certificates: []tls.Certificate{deviceCert},
+		RootCAs:      serverPool,
 	}
 
 	req, err := http.NewRequest(http.MethodPut, ts.URL, nil)
@@ -85,7 +84,7 @@ func generateKeyAndCSR(t *testing.T) ([]byte, []byte) {
 			Province:     []string{"California"},
 		},
 		SignatureAlgorithm: x509.SHA256WithRSA,
-		IPAddresses:        []net.IP{net.ParseIP("127.0.0.1")},
+		IPAddresses:        []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
 	}
 
 	req, err := x509.CreateCertificateRequest(rand.Reader, template, rsaKey)
@@ -184,7 +183,7 @@ func signCSR(t *testing.T, csr []byte, caKey crypto.Signer, caCert *x509.Certifi
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		SubjectKeyId:          calculateSubjectKeyIdentifier(t, certificateRequest.PublicKey),
 		BasicConstraintsValid: true,
 		IPAddresses:           certificateRequest.IPAddresses,

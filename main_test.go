@@ -55,8 +55,9 @@ func TestDeviceFromTLS(t *testing.T) {
 
 	client := ts.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{
-		Certificates: []tls.Certificate{deviceCert},
-		RootCAs:      pool,
+		Certificates:       []tls.Certificate{deviceCert},
+		RootCAs:            pool,
+		InsecureSkipVerify: true,
 	}
 
 	req, err := http.NewRequest(http.MethodPut, ts.URL, nil)
